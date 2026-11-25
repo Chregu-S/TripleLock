@@ -2,11 +2,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from backtester import fetch_history, run_backtest
+from backtester import fetch_history, run_backtest, run_grid_search
 from config import STRATEGIES
 
 st.set_page_config(page_title="Triple Lock Backtester", layout="wide")
-st.title("🔒 Triple Lock – 3x ETF Backtester")
+st.title("🔒 Triple Lock – 3x ETF Backtester & Optimierer")
 
 
 @st.cache_data(ttl=3600)
@@ -19,41 +19,87 @@ st.sidebar.header("1. Strategie & Daten")
 strat_map = {f"{s['ticker']} ({s['long_asset']})": s for s in STRATEGIES}
 selected_label = st.sidebar.selectbox("Strategie wählen", list(strat_map.keys()))
 cfg = strat_map[selected_label]
+tk = cfg["ticker"]
 
 use_proxy = st.sidebar.checkbox(
-    f"Langer Index-Proxy ({cfg['backtest_ticker']}) statt {cfg['ticker']}",
+    f"Langer Index-Proxy ({cfg['backtest_ticker']}) statt {tk}",
     value=True,
+    key=f"proxy_{tk}",
 )
-ticker_to_load = cfg["backtest_ticker"] if use_proxy else cfg["ticker"]
+ticker_to_load = cfg["backtest_ticker"] if use_proxy else tk
 
-start_year = st.sidebar.slider("Startjahr", 1980, 2024, 1990)
+start_year = st.sidebar.slider("Startjahr", 1980, 2024, 1980)
+
+default_div = float(cfg.get("proxy_div_yield", 0.0)) if use_proxy else 0.0
+div_yield_pct = st.sidebar.slider(
+    "Dividenden-Korrektur (% p.a.)",
+    0.0,
+    4.0,
+    default_div,
+    0.1,
+    key=f"div_{tk}_{use_proxy}",
+    help="Bei Kursindizes (^GSPC, ^NDX, ^SOX) fehlen Dividenden. Bei echten ETFs (SPY, QQQ) auf 0.0 % lassen.",
+)
 
 st.sidebar.header("2. Locks ein-/ausschalten")
-use_sma = st.sidebar.checkbox("SMA-Lock aktiv", value=True)
-use_ema = st.sidebar.checkbox("EMA-Lock aktiv", value=True)
+use_sma = st.sidebar.checkbox("SMA-Lock aktiv", value=True, key=f"use_sma_{tk}")
+use_ema = st.sidebar.checkbox("EMA-Lock aktiv", value=True, key=f"use_ema_{tk}")
 has_vix = cfg.get("vol_ticker") is not None
-use_vol = st.sidebar.checkbox("VIX-Lock aktiv", value=has_vix)
+use_vol = st.sidebar.checkbox("VIX-Lock aktiv", value=has_vix, key=f"use_vol_{tk}")
 has_rvol = cfg.get("realized_vol_window") is not None
-use_rvol = st.sidebar.checkbox("Realized-Vol-Lock aktiv", value=has_rvol)
+use_rvol = st.sidebar.checkbox("Realized-Vol-Lock aktiv", value=has_rvol, key=f"use_rvol_{tk}")
 
 st.sidebar.header("3. Parameter-Tuning")
 with st.sidebar.expander("SMA-Parameter", expanded=True):
-    sma_period = st.number_input("Entry SMA", 20, 300, cfg["sma_period"], step=10)
-    exit_sma_period = st.number_input("Exit SMA", 20, 300, cfg.get("exit_sma_period", cfg["sma_period"]), step=10)
-    sma_entry_mult = st.slider("SMA Entry Buffer (%)", -5.0, 5.0, (cfg["sma_entry_mult"] - 1) * 100, 0.25) / 100 + 1
-    sma_exit_mult = st.slider("SMA Exit Buffer (%)", -5.0, 5.0, (cfg["sma_exit_mult"] - 1) * 100, 0.25) / 100 + 1
+    sma_period = st.number_input("Entry SMA", 20, 300, cfg["sma_period"], step=10, key=f"sma_en_{tk}")
+    exit_sma_period = st.number_input(
+        "Exit SMA", 20, 300, cfg.get("exit_sma_period", cfg["sma_period"]), step=10, key=f"sma_ex_{tk}"
+    )
+    sma_entry_mult = (
+        st.slider("SMA Entry Buffer (%)", -5.0, 5.0, (cfg["sma_entry_mult"] - 1) * 100, 0.25, key=f"smab_en_{tk}") / 100
+        + 1
+    )
+    sma_exit_mult = (
+        st.slider("SMA Exit Buffer (%)", -5.0, 5.0, (cfg["sma_exit_mult"] - 1) * 100, 0.25, key=f"smab_ex_{tk}") / 100
+        + 1
+    )
 
 with st.sidebar.expander("EMA-Parameter"):
-    ema_fast = st.number_input("EMA Fast", 5, 100, cfg["ema_fast"])
-    ema_slow = st.number_input("EMA Slow", 10, 200, cfg["ema_slow"])
-    ema_entry_mult = st.slider("EMA Entry Hysterese (%)", -2.0, 2.0, (cfg["ema_entry_mult"] - 1) * 100, 0.1) / 100 + 1
-    ema_exit_mult = st.slider("EMA Exit Hysterese (%)", -2.0, 2.0, (cfg["ema_exit_mult"] - 1) * 100, 0.1) / 100 + 1
+    ema_fast = st.number_input("EMA Fast", 5, 100, cfg["ema_fast"], key=f"ema_f_{tk}")
+    ema_slow = st.number_input("EMA Slow", 10, 200, cfg["ema_slow"], key=f"ema_s_{tk}")
+    ema_entry_mult = (
+        st.slider("EMA Entry Hysterese (%)", -2.0, 2.0, (cfg["ema_entry_mult"] - 1) * 100, 0.1, key=f"emab_en_{tk}")
+        / 100
+        + 1
+    )
+    ema_exit_mult = (
+        st.slider("EMA Exit Hysterese (%)", -2.0, 2.0, (cfg["ema_exit_mult"] - 1) * 100, 0.1, key=f"emab_ex_{tk}") / 100
+        + 1
+    )
 
 with st.sidebar.expander("Volatilitäts-Parameter"):
-    vol_entry_max = st.slider("VIX Entry Max", 10.0, 50.0, float(cfg.get("vol_entry_max", 25.0)), 1.0)
-    vol_exit_min = st.slider("VIX Exit Min", 10.0, 60.0, float(cfg.get("vol_exit_min", 27.0)), 1.0)
-    rvol_entry_max = st.slider("Realized Vol Entry Max (%)", 15.0, 80.0, float(cfg.get("realized_vol_entry_max", 45.0)), 1.0)
-    rvol_exit_min = st.slider("Realized Vol Exit Min (%)", 15.0, 100.0, float(cfg.get("realized_vol_exit_min", 55.0)), 1.0)
+    vol_entry_max = st.slider(
+        "VIX Entry Max", 10.0, 50.0, float(cfg.get("vol_entry_max", 25.0)), 1.0, key=f"vix_en_{tk}"
+    )
+    vol_exit_min = st.slider(
+        "VIX Exit Min", 10.0, 60.0, float(cfg.get("vol_exit_min", 27.0)), 1.0, key=f"vix_ex_{tk}"
+    )
+    rvol_entry_max = st.slider(
+        "Realized Vol Entry Max (%)",
+        15.0,
+        80.0,
+        float(cfg.get("realized_vol_entry_max", 45.0)),
+        1.0,
+        key=f"rvol_en_{tk}",
+    )
+    rvol_exit_min = st.slider(
+        "Realized Vol Exit Min (%)",
+        15.0,
+        100.0,
+        float(cfg.get("realized_vol_exit_min", 55.0)),
+        1.0,
+        key=f"rvol_ex_{tk}",
+    )
 
 st.sidebar.header("4. Kosten & Hebel")
 leverage = st.sidebar.selectbox("Hebel", [1, 2, 3], index=2)
@@ -61,7 +107,7 @@ fee_pct = st.sidebar.slider("Fee + Slippage pro Trade (%)", 0.0, 1.0, 0.15, 0.05
 ter_3x_pct = st.sidebar.slider("3x ETP TER (% p.a.)", 0.0, 2.0, 0.75, 0.05)
 borrow_spread_pct = st.sidebar.slider("Finanzierungs-Spread über T-Bill (% p.a.)", 0.0, 2.0, 0.50, 0.10)
 
-# --- DATEN LADEN & BACKTEST AUSFÜHREN ---
+# --- DATEN LADEN ---
 with st.spinner(f"Lade historische Daten für {ticker_to_load}..."):
     price_series = load_cached_series(ticker_to_load)
     rf_series = load_cached_series("^IRX")
@@ -69,6 +115,7 @@ with st.spinner(f"Lade historische Daten für {ticker_to_load}..."):
 
 params = {
     "start_date": f"{start_year}-01-01",
+    "div_yield": div_yield_pct / 100.0,
     "use_sma": use_sma,
     "use_ema": use_ema,
     "use_vol": use_vol,
@@ -90,50 +137,120 @@ params = {
     "fee_per_trade": fee_pct / 100.0,
     "ter_3x": ter_3x_pct / 100.0,
     "borrow_spread": borrow_spread_pct / 100.0,
-    "cash_ter": 0.0010,  # 0.10% für XEON
+    "cash_ter": 0.0010,  # 0.10 % für XEON
 }
 
 df, trades_df, metrics = run_backtest(price_series, rf_series, vol_series, params)
 
 st.caption(
     f"Zeitraum: **{df.index[0].strftime('%Y-%m-%d')}** bis **{df.index[-1].strftime('%Y-%m-%d')}** "
-    f"({len(df):,} Handelstage) | Underlying: **{ticker_to_load}** | Cash-Proxy: **^IRX**"
+    f"({len(df):,} Handelstage) | Underlying: **{ticker_to_load}** | "
+    f"Dividenden-Korrektur: **+{div_yield_pct:.1f} % p.a.** | Cash-Proxy: **^IRX**"
 )
 
-# --- KENNZAHLEN-TABELLE ---
-st.subheader("Performance-Vergleich")
-st.dataframe(pd.DataFrame(metrics).T, use_container_width=True)
+# --- TABS ---
+tab1, tab2 = st.tabs(["📊 Einzel-Backtest", "🔍 Parameter-Optimierer (Grid Search)"])
 
-# --- EQUITY CURVE ---
-col1, col2 = st.columns([3, 1])
-with col1:
-    st.subheader("Equity Curve (Wachstum von 1 $)")
-with col2:
-    log_scale = st.checkbox("Logarithmische Skala", value=True)
+with tab1:
+    st.subheader("Performance-Vergleich")
+    st.dataframe(pd.DataFrame(metrics).T, use_container_width=True)
 
-fig_eq = go.Figure()
-fig_eq.add_trace(go.Scatter(x=df.index, y=df["eq_strat"], name="Triple Lock", line=dict(color="#00CC96", width=2)))
-fig_eq.add_trace(go.Scatter(x=df.index, y=df["eq_3x_bh"], name=f"{leverage}x Buy & Hold", line=dict(color="#EF553B", width=1.5, dash="dot")))
-fig_eq.add_trace(go.Scatter(x=df.index, y=df["eq_1x_bh"], name="1x Buy & Hold", line=dict(color="#636EFA", width=1.5)))
-fig_eq.update_layout(
-    yaxis_type="log" if log_scale else "linear",
-    hovermode="x unified",
-    margin=dict(l=0, r=0, t=10, b=0),
-    height=450,
-)
-st.plotly_chart(fig_eq, use_container_width=True)
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.subheader("Equity Curve (Wachstum von 1 $)")
+    with col2:
+        log_scale = st.checkbox("Logarithmische Skala", value=True)
 
-# --- DRAWDOWN CHART ---
-st.subheader("Underwater / Drawdown (%)")
-dd_strat = (df["eq_strat"] / df["eq_strat"].cummax() - 1) * 100
-dd_3x = (df["eq_3x_bh"] / df["eq_3x_bh"].cummax() - 1) * 100
+    fig_eq = go.Figure()
+    fig_eq.add_trace(
+        go.Scatter(x=df.index, y=df["eq_strat"], name="Triple Lock", line=dict(color="#00CC96", width=2))
+    )
+    fig_eq.add_trace(
+        go.Scatter(
+            x=df.index,
+            y=df["eq_3x_bh"],
+            name=f"{leverage}x Buy & Hold",
+            line=dict(color="#EF553B", width=1.5, dash="dot"),
+        )
+    )
+    fig_eq.add_trace(
+        go.Scatter(x=df.index, y=df["eq_1x_bh"], name="1x Buy & Hold", line=dict(color="#636EFA", width=1.5))
+    )
+    fig_eq.update_layout(
+        yaxis_type="log" if log_scale else "linear",
+        hovermode="x unified",
+        margin=dict(l=0, r=0, t=10, b=0),
+        height=450,
+    )
+    st.plotly_chart(fig_eq, use_container_width=True)
 
-fig_dd = go.Figure()
-fig_dd.add_trace(go.Scatter(x=df.index, y=dd_strat, name="Triple Lock DD", fill="tozeroy", line=dict(color="#00CC96")))
-fig_dd.add_trace(go.Scatter(x=df.index, y=dd_3x, name=f"{leverage}x B&H DD", line=dict(color="#EF553B", width=1)))
-fig_dd.update_layout(hovermode="x unified", margin=dict(l=0, r=0, t=10, b=0), height=300)
-st.plotly_chart(fig_dd, use_container_width=True)
+    st.subheader("Underwater / Drawdown (%)")
+    dd_strat = (df["eq_strat"] / df["eq_strat"].cummax() - 1) * 100
+    dd_3x = (df["eq_3x_bh"] / df["eq_3x_bh"].cummax() - 1) * 100
 
-# --- TRADE LOG ---
-with st.expander(f"Trade-Historie anzeigen ({len(trades_df)} Signale)"):
-    st.dataframe(trades_df.sort_values("Date", ascending=False), use_container_width=True)
+    fig_dd = go.Figure()
+    fig_dd.add_trace(
+        go.Scatter(x=df.index, y=dd_strat, name="Triple Lock DD", fill="tozeroy", line=dict(color="#00CC96"))
+    )
+    fig_dd.add_trace(
+        go.Scatter(x=df.index, y=dd_3x, name=f"{leverage}x B&H DD", line=dict(color="#EF553B", width=1))
+    )
+    fig_dd.update_layout(hovermode="x unified", margin=dict(l=0, r=0, t=10, b=0), height=300)
+    st.plotly_chart(fig_dd, use_container_width=True)
+
+    with st.expander(f"Trade-Historie anzeigen ({len(trades_df)} Signale)"):
+        if not trades_df.empty:
+            st.dataframe(trades_df.sort_values("Date", ascending=False), use_container_width=True)
+        else:
+            st.info("Keine Trades im ausgewählten Zeitraum.")
+
+with tab2:
+    st.subheader("Automatische Parameter-Suche (Train / Test Split)")
+    st.markdown(
+        "Testet systematisch Kombinationen aus SMA, EMA, VIX und Realized Vol. "
+        "Achte darauf, dass **Train Sharpe / Calmar** und **Test Sharpe / Calmar** beide stark sind (Overfitting-Schutz)."
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        sma_list = st.multiselect(
+            "SMA Perioden", [50, 100, 125, 150, 175, 200, 225, 250], default=[150, 200, 250]
+        )
+        test_ema_toggle = st.checkbox("EMA-Lock (An vs. Aus) testen", value=True)
+    with c2:
+        vix_exit_list = st.multiselect("VIX Exit-Schwellen", [25.0, 27.0, 30.0, 35.0, 40.0], default=[27.0, 35.0])
+        test_vix_toggle = st.checkbox("VIX-Lock (An vs. Aus) testen", value=True)
+        test_rvol_toggle = st.checkbox("Realized-Vol-Lock (An vs. Aus) testen", value=has_rvol)
+    with c3:
+        split_year = st.number_input("Train/Test Split-Jahr", 2000, 2023, 2016)
+        sort_metric = st.selectbox(
+            "Sortieren nach", ["Train Sharpe", "Train Calmar", "Sharpe", "Calmar", "CAGR (%)"]
+        )
+
+    if st.button("🚀 Optimierung starten", type="primary"):
+        grid = {
+            "sma_period": sma_list or [200],
+            "use_ema": [True, False] if test_ema_toggle else [use_ema],
+            "use_vol": [True, False] if test_vix_toggle else [use_vol],
+            "vol_exit_min": vix_exit_list or [27.0],
+            "use_rvol": [True, False] if test_rvol_toggle else [use_rvol],
+        }
+
+        with st.spinner(f"Berechne Grid Search für {ticker_to_load} (ab {start_year})..."):
+            v_series = load_cached_series("^VIX") if True in grid["use_vol"] else None
+            res_df = run_grid_search(price_series, rf_series, v_series, params, grid, split_year=split_year)
+
+        if not res_df.empty:
+            sort_col = sort_metric if sort_metric in res_df.columns else "Sharpe"
+            res_df = res_df.sort_values(by=sort_col, ascending=False).reset_index(drop=True)
+            st.success(f"Fertig! {len(res_df)} eindeutige Kombinationen ausgewertet.")
+            st.dataframe(res_df.head(30), use_container_width=True)
+
+            st.download_button(
+                "📥 Alle Ergebnisse als CSV herunterladen",
+                res_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"grid_search_{tk}_{start_year}.csv",
+                mime="text/csv",
+            )
+        else:
+            st.warning("Keine gültigen Ergebnisse — prüfe das Startjahr oder die Parameter.")
