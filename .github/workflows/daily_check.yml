@@ -2,8 +2,10 @@ name: Triple Lock Daily Check
 
 on:
   schedule:
-    # Montag bis Freitag um 22:30 UTC (nach US-Börsenschluss)
+    # Montag bis Freitag um 22:30 UTC (täglicher Check nach US-Börsenschluss)
     - cron: "30 22 * * 1-5"
+    # Jeden Sonntag um 18:00 UTC (19:00 MEZ / 20:00 MESZ) für Wochen-Status
+    - cron: "0 18 * * 0"
   workflow_dispatch:
     inputs:
       test_notify:
@@ -39,12 +41,14 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.test_notify }}" = "true" ]; then
             python main.py --test-notify
+          elif [ "${{ github.event.schedule }}" = "0 18 * * 0" ]; then
+            python main.py --weekly-summary
           else
             python main.py
           fi
 
       - name: Aktualisierte state.json committen und pushen
-        if: ${{ github.event.inputs.test_notify != 'true' }}
+        if: ${{ github.event.inputs.test_notify != 'true' && github.event.schedule != '0 18 * * 0' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
