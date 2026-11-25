@@ -107,6 +107,8 @@ def run_backtest(
     use_ema = params["use_ema"]
     use_vol = params["use_vol"]
     use_rvol = params["use_rvol"]
+    if not d.get("use_ema", True) and "ema_pair" in d:
+    d["ema_pair"] = None
 
     prices = df["price"].to_numpy()
     sma_en = df["sma_entry"].to_numpy() * params["sma_entry_mult"]
@@ -296,6 +298,8 @@ def run_grid_search(
             p["vol_entry_max"] = max(10.0, combo_dict["vol_exit_min"] - 3.0)
         if combo_dict.get("rvol_exit_min") is not None:
             p["rvol_entry_max"] = max(15.0, combo_dict["rvol_exit_min"] - 10.0)
+        if combo_dict.get("ema_pair") is not None:
+            p["ema_fast"], p["ema_slow"] = combo_dict["ema_pair"]
 
         df, _, _ = run_backtest(price, rf_series, vol_series, p)
         if len(df) < 252:
