@@ -242,20 +242,25 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
     return new_pos, metrics, triggers
 
 
-def format_summary_message(results: list[dict], is_test: bool = False) -> str:
+def format_summary_message(
+    results: list[dict], is_test: bool = False, is_weekly: bool = False
+) -> str:
     """Erstellt EINE übersichtliche Sammel-Nachricht mit Aktionen + Status-Tabelle."""
     data_date = results[0]["metrics"]["data_date"] if results else "-"
     changes = [r for r in results if r["changed"]]
+    readonly = is_test or is_weekly
 
     if is_test:
         header = f"🧪 <b>[TRIPLE LOCK - TEST] ({data_date})</b>"
+    elif is_weekly:
+        header = f"📊 <b>[TRIPLE LOCK] WOCHEN-STATUS ({data_date})</b>"
     else:
         header = f"🚨 <b>[TRIPLE LOCK] SIGNAL-UPDATE ({data_date})</b>"
 
     lines = [header, ""]
 
-    # 1. Aktionsblock (nur bei echten Wechseln oder Hinweis im Testmodus)
-    if changes:
+    # 1. Aktionsblock (bei echten Wechseln oder Hinweis im Test-/Wochenmodus)
+    if changes and not readonly:
         lines.append("<b>AKTION ERFORDERLICH:</b>")
         for r in changes:
             cfg = r["cfg"]
@@ -273,6 +278,8 @@ def format_summary_message(results: list[dict], is_test: bool = False) -> str:
         lines.append("")
     elif is_test:
         lines.append("<i>Testlauf: Kein State-Wechsel gespeichert.</i>\n")
+    elif is_weekly:
+        lines.append("<i>Wöchentlicher Status-Report (kein Signalwechsel).</i>\n")
 
     # 2. Kompakte Übersichtstabelle für alle Assets
     lines.append("<b>PORTFOLIO-ÜBERSICHT:</b>")
@@ -281,7 +288,7 @@ def format_summary_message(results: list[dict], is_test: bool = False) -> str:
     for r in results:
         cfg = r["cfg"]
         m = r["metrics"]
-        pos = r["old_pos"] if is_test else r["new_pos"]
+        pos = r["old_pos"] if readonly else r["new_pos"]
         icon = "🟢" if pos == "LONG" else "🔴"
         target = cfg["long_asset"] if pos == "LONG" else cfg["cash_asset"]
 
@@ -317,7 +324,13 @@ def main() -> None:
         action="store_true",
         help="Sendet eine Test-Sammelnachricht mit Live-Daten, ohne state.json zu verändern.",
     )
+    parser.add_argument(
+        "--weekly-summary",
+        action="store_true",
+        help="Sendet den wöchentlichen Status-Report, ohne state.json zu verändern.",
+    )
     args = parser.parse_args()
+    readonly_mode = args.test_notify or args.weekly_summary
 
     state = load_state()
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -350,21 +363,22 @@ def main() -> None:
             }
         )
 
-        if not args.test_notify:
+        if not readonly_mode:
             state[ticker] = {
                 "position": new_pos,
                 "last_check": now_utc,
                 "indicators": metrics,
             }
 
-    # Eine konsolidierte Nachricht senden, wenn mind. 1 Wechsel stattfand (oder Testmodus)
-    if results and (args.test_notify or any(r["changed"] for r in results)):
-        msg = format_summary_message(results, is_test=args.test_notify)
+    # Eine konsolidierte Nachricht senden bei Wechsel, Test oder Wochen-Report
+    if results and (readonly_mode or any(r["changed"] for r in results)):
+        msg = format_summary_message(
+            results, is_test=args.test_notify, is_weekly=args.weekly_summary
+        )
         send_telegram_message(msg)
-        mode = "Test-Sammelnachricht" if args.test_notify else "Signal-Sammelnachricht"
-        print(f"{mode} erfolgreich an Telegram gesendet.")
+        print("Nachricht erfolgreich an Telegram gesendet.")
 
-    if not args.test_notify and results:
+    if not readonly_mode and results:
         save_state(state)
         print("state.json erfolgreich aktualisiert.")
 
