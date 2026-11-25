@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -21,9 +23,15 @@ def run_backtest(
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
     Führt die Triple-Lock-Strategie historisch aus (Execution am Folgetag t+1).
+    Inkl. optionaler Dividenden-Korrektur für Kursindizes (^GSPC, ^NDX, ^SOX).
     """
-    df = pd.DataFrame({"price": price})
-    df["ret_1x"] = df["price"].pct_change().fillna(0.0)
+    df = pd.DataFrame({"raw_price": price})
+    raw_ret = df["raw_price"].pct_change().fillna(0.0)
+    div_daily = params.get("div_yield", 0.0) / 252.0
+
+    # Total-Return-Rendite & synthetischer Total-Return-Kurs für konsistente SMAs/EMAs
+    df["ret_1x"] = raw_ret + div_daily
+    df["price"] = (1.0 + df["ret_1x"]).cumprod() * df["raw_price"].iloc[0]
 
     # Risikofreier Zins (^IRX in % p.a. -> Dezimal)
     rf_aligned = rf_series.reindex(df.index).ffill().bfill().fillna(0.0) / 100.0
@@ -41,14 +49,14 @@ def run_backtest(
     df["ema_slow"] = df["price"].ewm(span=params["ema_slow"], adjust=False).mean()
 
     rvol_win = params.get("realized_vol_window", 20)
-    df["rvol"] = df["ret_1x"].rolling(rvol_win).std() * np.sqrt(252) * 100.0
+    df["rvol"] = raw_ret.rolling(rvol_win).std() * np.sqrt(252) * 100.0
 
     # Auf Startdatum und gültige Indikatoren filtern
     df = df.dropna(subset=["sma_entry", "sma_exit", "ema_fast", "ema_slow"]).copy()
     if params.get("start_date"):
         df = df.loc[df.index >= pd.Timestamp(params["start_date"])].copy()
 
-    # Synthetische 3x-Rendite & Cash-Rendite
+    # Synthetische 3x-Rendite & Cash-Rendite (XEON-Proxy)
     leverage = params["leverage"]
     ter_3x = params["ter_3x"]
     borrow_spread = params["borrow_spread"]
@@ -104,7 +112,6 @@ def run_backtest(
                 curr_pos = 0
                 trades.append({"Date": dates[i + 1], "Action": "SELL", "Reason": ", ".join(reasons)})
 
-        # Position gilt für den Folgetag i+1
         positions[i + 1] = curr_pos
 
     df["position"] = positions
@@ -112,8 +119,8 @@ def run_backtest(
 
     # Strategie-Return inkl. Fees/Slippage bei jedem Wechsel
     fee = params["fee_per_trade"]
-    raw_ret = np.where(df["position"] == 1, df["ret_3x"], df["ret_cash"])
-    df["ret_strat"] = (1.0 + raw_ret) * (1.0 - df["trade_flag"] * fee) - 1.0
+    raw_strat_ret = np.where(df["position"] == 1, df["ret_3x"], df["ret_cash"])
+    df["ret_strat"] = (1.0 + raw_strat_ret) * (1.0 - df["trade_flag"] * fee) - 1.0
 
     # Equity Curves (Basis 1.0)
     df["eq_strat"] = (1.0 + df["ret_strat"]).cumprod()
@@ -136,24 +143,22 @@ def compute_metrics(
     rf_annual: pd.Series,
     position: pd.Series | None = None,
 ) -> dict:
-    days = len(returns)
-    years = days / 252.0
+    years = len(returns) / 252.0
     total_return = equity.iloc[-1] - 1.0
-    cagr = (equity.iloc[-1] ** (1.0 / years) - 1.0) if years > 0 else 0.0
+    cagr = (equity.iloc[-1] ** (1.0 / years) - 1.0) if years > 0 and equity.iloc[-1] > 0 else -1.0
 
-    running_max = equity.cummax()
-    drawdown = (equity / running_max) - 1.0
-    max_dd = drawdown.min()
-
+    max_dd = ((equity / equity.cummax()) - 1.0).min()
     excess_ret = returns - (rf_annual / 252.0)
     vol_annual = returns.std() * np.sqrt(252)
     sharpe = (excess_ret.mean() * 252.0) / vol_annual if vol_annual > 0 else 0.0
+    calmar = cagr / abs(max_dd) if max_dd < 0 else 0.0
 
     res = {
         "Total Return": f"{total_return * 100:,.1f}%",
         "CAGR": f"{cagr * 100:.2f}%",
         "Max Drawdown": f"{max_dd * 100:.2f}%",
         "Sharpe Ratio": f"{sharpe:.2f}",
+        "Calmar Ratio": f"{calmar:.2f}",
         "Vola (p.a.)": f"{vol_annual * 100:.1f}%",
     }
     if position is not None:
@@ -163,3 +168,100 @@ def compute_metrics(
         res["Time in Market"] = "100.0%"
         res["Trades (Wechsel)"] = 1
     return res
+
+
+def compute_numeric_metrics(
+    returns: pd.Series,
+    equity: pd.Series,
+    rf_annual: pd.Series,
+    position: pd.Series,
+) -> dict:
+    """Reine Zahlen-Metriken zum Sortieren im Grid Search."""
+    years = len(returns) / 252.0
+    cagr = (equity.iloc[-1] ** (1.0 / years) - 1.0) if years > 0 and equity.iloc[-1] > 0 else -1.0
+    max_dd = ((equity / equity.cummax()) - 1.0).min()
+    excess_ret = returns - (rf_annual / 252.0)
+    vol = returns.std() * np.sqrt(252)
+    sharpe = (excess_ret.mean() * 252.0) / vol if vol > 0 else 0.0
+    calmar = cagr / abs(max_dd) if max_dd < 0 else 0.0
+    trades = int(position.diff().abs().sum())
+    return {
+        "CAGR (%)": round(cagr * 100, 2),
+        "Max DD (%)": round(max_dd * 100, 2),
+        "Sharpe": round(sharpe, 2),
+        "Calmar": round(calmar, 2),
+        "Trades": trades,
+        "Time in Mkt (%)": round(position.mean() * 100, 1),
+    }
+
+
+def run_grid_search(
+    price: pd.Series,
+    rf_series: pd.Series,
+    vol_series: pd.Series | None,
+    base_params: dict,
+    grid: dict,
+    split_year: int = 2016,
+) -> pd.DataFrame:
+    """
+    Testet alle sinnvollen Parameter-Kombinationen im Grid und teilt in Train (< split_year) & Test (>= split_year).
+    """
+    keys = list(grid.keys())
+    raw_combinations = list(itertools.product(*grid.values()))
+
+    # Duplikate entfernen (z. B. VIX-Schwellen nicht variieren, wenn use_vol=False)
+    seen = set()
+    combinations = []
+    for combo in raw_combinations:
+        d = dict(zip(keys, combo))
+        if not d.get("use_vol", True) and "vol_exit_min" in d:
+            d["vol_exit_min"] = None
+        if not d.get("use_rvol", True) and "rvol_exit_min" in d:
+            d["rvol_exit_min"] = None
+        sig = tuple(d.items())
+        if sig not in seen:
+            seen.add(sig)
+            combinations.append(d)
+
+    results = []
+    split_ts = pd.Timestamp(f"{split_year}-01-01")
+
+    for combo_dict in combinations:
+        p = base_params.copy()
+        for k, v in combo_dict.items():
+            if v is not None:
+                p[k] = v
+
+        # Exit-SMA an Entry-SMA koppeln, wenn nicht separat im Grid
+        if "exit_sma_period" not in combo_dict and "sma_period" in combo_dict:
+            p["exit_sma_period"] = p["sma_period"]
+        # VIX Entry-Max sinnvoll 2 Punkte unter Exit-Min halten, wenn VIX-Exit variiert wird
+        if combo_dict.get("vol_exit_min") is not None:
+            p["vol_entry_max"] = min(p["vol_entry_max"], combo_dict["vol_exit_min"] - 2.0)
+
+        df, _, _ = run_backtest(price, rf_series, vol_series, p)
+        if len(df) < 252:
+            continue
+
+        m_all = compute_numeric_metrics(df["ret_strat"], df["eq_strat"], df["rf_annual"], df["position"])
+
+        df_train = df.loc[df.index < split_ts]
+        df_test = df.loc[df.index >= split_ts]
+
+        row = {**combo_dict, **m_all}
+
+        if len(df_train) > 100 and len(df_test) > 100:
+            eq_tr = (1.0 + df_train["ret_strat"]).cumprod()
+            eq_te = (1.0 + df_test["ret_strat"]).cumprod()
+            m_tr = compute_numeric_metrics(df_train["ret_strat"], eq_tr, df_train["rf_annual"], df_train["position"])
+            m_te = compute_numeric_metrics(df_test["ret_strat"], eq_te, df_test["rf_annual"], df_test["position"])
+            row["Train Sharpe"] = m_tr["Sharpe"]
+            row["Train Calmar"] = m_tr["Calmar"]
+            row["Test Sharpe"] = m_te["Sharpe"]
+            row["Test Calmar"] = m_te["Calmar"]
+            row["Test CAGR (%)"] = m_te["CAGR (%)"]
+            row["Test Max DD (%)"] = m_te["Max DD (%)"]
+
+        results.append(row)
+
+    return pd.DataFrame(results)
