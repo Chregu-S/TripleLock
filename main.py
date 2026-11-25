@@ -24,7 +24,7 @@ STRATEGIES = [
         "ema_fast": 19,
         "ema_slow": 39,
         "ema_entry_mult": 1.002,  # +0,20 % Hysterese
-        "ema_exit_mult": 0.998,   # -0,20 % Hysterese
+        "ema_exit_mult": 0.995,   # -0,50 % Hysterese (weniger Whipsaws)
         "vol_ticker": "^VIX",
         "vol_entry_max": 25.0,
         "vol_exit_min": 27.0,
@@ -40,7 +40,7 @@ STRATEGIES = [
         "ema_fast": 19,
         "ema_slow": 39,
         "ema_entry_mult": 1.002,
-        "ema_exit_mult": 0.998,
+        "ema_exit_mult": 0.995,   # -0,50 % Hysterese
         "vol_ticker": "^VIX",
         "vol_entry_max": 25.0,
         "vol_exit_min": 27.0,
@@ -56,29 +56,25 @@ STRATEGIES = [
         "ema_fast": 19,
         "ema_slow": 39,
         "ema_entry_mult": 1.002,
-        "ema_exit_mult": 0.998,
-        "vol_ticker": "^GVZ",     # CBOE Gold Volatility Index (None = ohne Vola-Lock)
-        "vol_entry_max": 20.0,
-        "vol_exit_min": 24.0,
+        "ema_exit_mult": 0.995,   # -0,50 % Hysterese
+        "vol_ticker": None,       # Kein Vola-Lock bei Gold (GVZ bremst Krisen-Rallyes)
     },
     {
         "ticker": "SOXX",
         "long_asset": "3SEM",
         "cash_asset": "XEON",
         "sma_period": 200,
-        "exit_sma_period": 50,    # Schnellerer Trend-Exit gegen fallende Messer
+        "exit_sma_period": 100,   # Kompromiss zwischen trägem SMA200 und nervösem SMA50
         "sma_entry_mult": 1.02,
         "sma_exit_mult": 0.99,
         "ema_fast": 19,
         "ema_slow": 39,
         "ema_entry_mult": 1.002,
-        "ema_exit_mult": 0.998,
-        "vol_ticker": "^VIX",
-        "vol_entry_max": 25.0,
-        "vol_exit_min": 27.0,
+        "ema_exit_mult": 0.995,   # -0,50 % Hysterese
+        "vol_ticker": None,       # Kein VIX, Fokus auf eigene Sektor-Vola
         "realized_vol_window": 20,
-        "realized_vol_entry_max": 40.0,
-        "realized_vol_exit_min": 45.0,
+        "realized_vol_entry_max": 45.0,
+        "realized_vol_exit_min": 55.0,
     },
 ]
 
@@ -311,7 +307,7 @@ def format_summary_message(
     lines.append("<pre>" + "\n".join(table_rows) + "</pre>")
     lines.append(
         "<i>🟢 = Investiert (3x) | 🔴 = Cash (XEON)\n"
-        "vsSMA = Abstand zum aktiven SMA (SOXX Exit: SMA50)</i>"
+        "vsSMA = Abstand zum aktiven SMA (SOXX Exit: SMA100)</i>"
     )
 
     return "\n".join(lines)
