@@ -13,69 +13,7 @@ STATE_FILE = Path("state.json")
 
 # Modulare Strategie-Konfiguration
 STRATEGIES = [
-    {
-        "ticker": "QQQ",
-        "long_asset": "3QQQ",
-        "cash_asset": "XEON",
-        "sma_period": 200,
-        "exit_sma_period": 200,
-        "sma_entry_mult": 1.02,   # +2,0 % Buffer
-        "sma_exit_mult": 0.99,    # -1,0 % Buffer
-        "ema_fast": 19,
-        "ema_slow": 39,
-        "ema_entry_mult": 1.002,  # +0,20 % Hysterese
-        "ema_exit_mult": 0.995,   # -0,50 % Hysterese (weniger Whipsaws)
-        "vol_ticker": "^VIX",
-        "vol_entry_max": 25.0,
-        "vol_exit_min": 27.0,
-    },
-    {
-        "ticker": "SPY",
-        "long_asset": "3USL",
-        "cash_asset": "XEON",
-        "sma_period": 200,
-        "exit_sma_period": 200,
-        "sma_entry_mult": 1.02,
-        "sma_exit_mult": 0.99,
-        "ema_fast": 19,
-        "ema_slow": 39,
-        "ema_entry_mult": 1.002,
-        "ema_exit_mult": 0.995,   # -0,50 % Hysterese
-        "vol_ticker": "^VIX",
-        "vol_entry_max": 25.0,
-        "vol_exit_min": 27.0,
-    },
-    {
-        "ticker": "GLD",
-        "long_asset": "3GOL",
-        "cash_asset": "XEON",
-        "sma_period": 200,
-        "exit_sma_period": 200,
-        "sma_entry_mult": 1.02,
-        "sma_exit_mult": 0.99,
-        "ema_fast": 19,
-        "ema_slow": 39,
-        "ema_entry_mult": 1.002,
-        "ema_exit_mult": 0.995,   # -0,50 % Hysterese
-        "vol_ticker": None,       # Kein Vola-Lock bei Gold (GVZ bremst Krisen-Rallyes)
-    },
-    {
-        "ticker": "SOXX",
-        "long_asset": "3SEM",
-        "cash_asset": "XEON",
-        "sma_period": 200,
-        "exit_sma_period": 100,   # Kompromiss zwischen trägem SMA200 und nervösem SMA50
-        "sma_entry_mult": 1.02,
-        "sma_exit_mult": 0.99,
-        "ema_fast": 19,
-        "ema_slow": 39,
-        "ema_entry_mult": 1.002,
-        "ema_exit_mult": 0.995,   # -0,50 % Hysterese
-        "vol_ticker": None,       # Kein VIX, Fokus auf eigene Sektor-Vola
-        "realized_vol_window": 20,
-        "realized_vol_entry_max": 45.0,
-        "realized_vol_exit_min": 55.0,
-    },
+    from config import STRATEGIES
 ]
 
 
