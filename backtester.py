@@ -15,6 +15,38 @@ def fetch_history(symbol: str, start: str = "1980-01-01") -> pd.Series:
     return s[~s.index.duplicated(keep="last")]
 
 
+def _calc_core_stats(returns: pd.Series, equity: pd.Series, rf_annual: pd.Series) -> dict:
+    """Berechnet alle Kernkennzahlen (inkl. Sortino & Ulcer Index) als reine Floats."""
+    years = len(returns) / 252.0
+    total_return = equity.iloc[-1] - 1.0
+    cagr = (equity.iloc[-1] ** (1.0 / years) - 1.0) if years > 0 and equity.iloc[-1] > 0 else -1.0
+
+    dd_series = (equity / equity.cummax()) - 1.0
+    max_dd = dd_series.min()
+    ulcer_index = float(np.sqrt(np.mean((dd_series * 100.0) ** 2)))
+
+    excess_ret = returns - (rf_annual / 252.0)
+    vol_annual = returns.std() * np.sqrt(252)
+    sharpe = (excess_ret.mean() * 252.0) / vol_annual if vol_annual > 0 else 0.0
+
+    downside = np.minimum(excess_ret, 0.0)
+    downside_std = float(np.sqrt(np.mean(downside ** 2)) * np.sqrt(252))
+    sortino = (excess_ret.mean() * 252.0) / downside_std if downside_std > 0 else 0.0
+
+    calmar = cagr / abs(max_dd) if max_dd < 0 else 0.0
+
+    return {
+        "total_return": total_return,
+        "cagr": cagr,
+        "max_dd": max_dd,
+        "ulcer": ulcer_index,
+        "vol": vol_annual,
+        "sharpe": sharpe,
+        "sortino": sortino,
+        "calmar": calmar,
+    }
+
+
 def run_backtest(
     price: pd.Series,
     rf_series: pd.Series,
@@ -143,30 +175,23 @@ def compute_metrics(
     rf_annual: pd.Series,
     position: pd.Series | None = None,
 ) -> dict:
-    years = len(returns) / 252.0
-    total_return = equity.iloc[-1] - 1.0
-    cagr = (equity.iloc[-1] ** (1.0 / years) - 1.0) if years > 0 and equity.iloc[-1] > 0 else -1.0
-
-    max_dd = ((equity / equity.cummax()) - 1.0).min()
-    excess_ret = returns - (rf_annual / 252.0)
-    vol_annual = returns.std() * np.sqrt(252)
-    sharpe = (excess_ret.mean() * 252.0) / vol_annual if vol_annual > 0 else 0.0
-    calmar = cagr / abs(max_dd) if max_dd < 0 else 0.0
-
+    s = _calc_core_stats(returns, equity, rf_annual)
     res = {
-        "Total Return": f"{total_return * 100:,.1f}%",
-        "CAGR": f"{cagr * 100:.2f}%",
-        "Max Drawdown": f"{max_dd * 100:.2f}%",
-        "Sharpe Ratio": f"{sharpe:.2f}",
-        "Calmar Ratio": f"{calmar:.2f}",
-        "Vola (p.a.)": f"{vol_annual * 100:.1f}%",
+        "Total Return": f"{s['total_return'] * 100:,.1f}%",
+        "CAGR": f"{s['cagr'] * 100:.2f}%",
+        "Max Drawdown": f"{s['max_dd'] * 100:.2f}%",
+        "Ulcer Index": f"{s['ulcer']:.1f}",
+        "Sharpe": f"{s['sharpe']:.2f}",
+        "Sortino": f"{s['sortino']:.2f}",
+        "Calmar": f"{s['calmar']:.2f}",
+        "Vola (p.a.)": f"{s['vol'] * 100:.1f}%",
     }
     if position is not None:
         res["Time in Market"] = f"{position.mean() * 100:.1f}%"
-        res["Trades (Wechsel)"] = int(position.diff().abs().sum())
+        res["Trades"] = int(position.diff().abs().sum())
     else:
         res["Time in Market"] = "100.0%"
-        res["Trades (Wechsel)"] = 1
+        res["Trades"] = 1
     return res
 
 
@@ -176,23 +201,54 @@ def compute_numeric_metrics(
     rf_annual: pd.Series,
     position: pd.Series,
 ) -> dict:
-    """Reine Zahlen-Metriken zum Sortieren im Grid Search."""
-    years = len(returns) / 252.0
-    cagr = (equity.iloc[-1] ** (1.0 / years) - 1.0) if years > 0 and equity.iloc[-1] > 0 else -1.0
-    max_dd = ((equity / equity.cummax()) - 1.0).min()
-    excess_ret = returns - (rf_annual / 252.0)
-    vol = returns.std() * np.sqrt(252)
-    sharpe = (excess_ret.mean() * 252.0) / vol if vol > 0 else 0.0
-    calmar = cagr / abs(max_dd) if max_dd < 0 else 0.0
-    trades = int(position.diff().abs().sum())
+    """Reine Zahlen-Metriken zum Sortieren & Plotten im Grid Search."""
+    s = _calc_core_stats(returns, equity, rf_annual)
     return {
-        "CAGR (%)": round(cagr * 100, 2),
-        "Max DD (%)": round(max_dd * 100, 2),
-        "Sharpe": round(sharpe, 2),
-        "Calmar": round(calmar, 2),
-        "Trades": trades,
+        "CAGR (%)": round(s["cagr"] * 100, 2),
+        "Max DD (%)": round(s["max_dd"] * 100, 2),
+        "Ulcer": round(s["ulcer"], 1),
+        "Sharpe": round(s["sharpe"], 2),
+        "Sortino": round(s["sortino"], 2),
+        "Calmar": round(s["calmar"], 2),
+        "Trades": int(position.diff().abs().sum()),
         "Time in Mkt (%)": round(position.mean() * 100, 1),
     }
+
+
+def compute_decade_breakdown(df: pd.DataFrame) -> pd.DataFrame:
+    """Berechnet Performance & Drawdown getrennt nach Dekaden (Regime-Stabilität)."""
+    rows = []
+    decades = sorted((df.index.year // 10 * 10).unique())
+
+    for dec in decades:
+        sub = df.loc[(df.index.year >= dec) & (df.index.year < dec + 10)]
+        if len(sub) < 60:
+            continue
+
+        eq_s = (1.0 + sub["ret_strat"]).cumprod()
+        eq_3 = (1.0 + sub["ret_3x"]).cumprod()
+        eq_1 = (1.0 + sub["ret_1x"]).cumprod()
+
+        ms = _calc_core_stats(sub["ret_strat"], eq_s, sub["rf_annual"])
+        m3 = _calc_core_stats(sub["ret_3x"], eq_3, sub["rf_annual"])
+        m1 = _calc_core_stats(sub["ret_1x"], eq_1, sub["rf_annual"])
+
+        rows.append(
+            {
+                "Dekade": f"{dec}er",
+                "Zeitraum": f"{sub.index[0].strftime('%Y-%m')} bis {sub.index[-1].strftime('%Y-%m')}",
+                "TL CAGR (%)": round(ms["cagr"] * 100, 1),
+                "TL Max DD (%)": round(ms["max_dd"] * 100, 1),
+                "TL Sortino": round(ms["sortino"], 2),
+                "TL Calmar": round(ms["calmar"], 2),
+                "3x B&H CAGR (%)": round(m3["cagr"] * 100, 1),
+                "3x B&H Max DD (%)": round(m3["max_dd"] * 100, 1),
+                "1x B&H CAGR (%)": round(m1["cagr"] * 100, 1),
+                "1x B&H Max DD (%)": round(m1["max_dd"] * 100, 1),
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def run_grid_search(
@@ -209,7 +265,7 @@ def run_grid_search(
     keys = list(grid.keys())
     raw_combinations = list(itertools.product(*grid.values()))
 
-    # Duplikate entfernen (z. B. VIX-Schwellen nicht variieren, wenn use_vol=False)
+    # Duplikate entfernen (z. B. VIX/RVol-Schwellen nicht variieren, wenn Lock aus ist)
     seen = set()
     combinations = []
     for combo in raw_combinations:
@@ -235,9 +291,11 @@ def run_grid_search(
         # Exit-SMA an Entry-SMA koppeln, wenn nicht separat im Grid
         if "exit_sma_period" not in combo_dict and "sma_period" in combo_dict:
             p["exit_sma_period"] = p["sma_period"]
-        # VIX Entry-Max sinnvoll 2 Punkte unter Exit-Min halten, wenn VIX-Exit variiert wird
+        # Hysterese für VIX & RVol automatisch konsistent halten
         if combo_dict.get("vol_exit_min") is not None:
-            p["vol_entry_max"] = min(p["vol_entry_max"], combo_dict["vol_exit_min"] - 2.0)
+            p["vol_entry_max"] = max(10.0, combo_dict["vol_exit_min"] - 3.0)
+        if combo_dict.get("rvol_exit_min") is not None:
+            p["rvol_entry_max"] = max(15.0, combo_dict["rvol_exit_min"] - 10.0)
 
         df, _, _ = run_backtest(price, rf_series, vol_series, p)
         if len(df) < 252:
@@ -255,10 +313,11 @@ def run_grid_search(
             eq_te = (1.0 + df_test["ret_strat"]).cumprod()
             m_tr = compute_numeric_metrics(df_train["ret_strat"], eq_tr, df_train["rf_annual"], df_train["position"])
             m_te = compute_numeric_metrics(df_test["ret_strat"], eq_te, df_test["rf_annual"], df_test["position"])
-            row["Train Sharpe"] = m_tr["Sharpe"]
+            row["Train Sortino"] = m_tr["Sortino"]
             row["Train Calmar"] = m_tr["Calmar"]
-            row["Test Sharpe"] = m_te["Sharpe"]
+            row["Test Sortino"] = m_te["Sortino"]
             row["Test Calmar"] = m_te["Calmar"]
+            row["Test Sharpe"] = m_te["Sharpe"]
             row["Test CAGR (%)"] = m_te["CAGR (%)"]
             row["Test Max DD (%)"] = m_te["Max DD (%)"]
 
