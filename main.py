@@ -57,8 +57,7 @@ STRATEGIES = [
         "ema_slow": 39,
         "ema_entry_mult": 1.002,
         "ema_exit_mult": 0.998,
-        # CBOE Gold Volatility Index (auf None setzen für reinen Double Lock)
-        "vol_ticker": "^GVZ",
+        "vol_ticker": "^GVZ",     # CBOE Gold Volatility Index (None = ohne Vola-Lock)
         "vol_entry_max": 20.0,
         "vol_exit_min": 24.0,
     },
@@ -77,7 +76,6 @@ STRATEGIES = [
         "vol_ticker": "^VIX",
         "vol_entry_max": 25.0,
         "vol_exit_min": 27.0,
-        # Zusätzlicher Lock: Annualisierte 20-Tage realisierte Volatilität (%)
         "realized_vol_window": 20,
         "realized_vol_entry_max": 40.0,
         "realized_vol_exit_min": 45.0,
@@ -141,10 +139,8 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
     sma_period = cfg["sma_period"]
     exit_sma_period = cfg.get("exit_sma_period", sma_period)
 
-    # Mind. 250 Handelstage für sauberen SMA200 + EMA-Einschwingvorgang
     close = fetch_close_series(ticker, min_rows=250)
 
-    # Basis-Indikatoren berechnen
     sma_entry_series = close.rolling(window=sma_period).mean()
     sma_exit_series = close.rolling(window=exit_sma_period).mean()
     ema_fast_series = close.ewm(span=cfg["ema_fast"], adjust=False).mean()
@@ -160,7 +156,7 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
     if any(pd.isna(val) for val in (price, sma_entry, sma_exit, ema_fast, ema_slow)):
         raise ValueError(f"NaN-Wert in den berechneten Indikatoren für {ticker}.")
 
-    # Optional: Externer Volatilitäts-Index (z. B. ^VIX oder ^GVZ)
+    # Optional: Externer Volatilitäts-Index (^VIX, ^GVZ)
     vol_ticker = cfg.get("vol_ticker")
     vol_index = None
     if vol_ticker:
@@ -178,7 +174,6 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
         if pd.isna(realized_vol):
             raise ValueError(f"NaN-Wert für realisierte Volatilität ({ticker}).")
 
-    # Schwellenwerte
     sma_entry_lvl = sma_entry * cfg["sma_entry_mult"]
     sma_exit_lvl = sma_exit * cfg["sma_exit_mult"]
     ema_entry_lvl = ema_slow * cfg["ema_entry_mult"]
@@ -221,12 +216,17 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
         if triggers:
             new_pos = "CASH"
 
+    # Abstand zum relevanten SMA für die kompakte Übersichtstabelle
+    ref_sma = sma_exit if new_pos == "LONG" else sma_entry
+    sma_dist_pct = ((price / ref_sma) - 1.0) * 100.0
+
     metrics = {
         "data_date": data_date,
         "price": round(price, 2),
         f"sma{sma_period}": round(sma_entry, 2),
         "sma_entry_lvl": round(sma_entry_lvl, 2),
         "sma_exit_lvl": round(sma_exit_lvl, 2),
+        "sma_dist_pct": round(sma_dist_pct, 1),
         "ema19": round(ema_fast, 2),
         "ema39": round(ema_slow, 2),
         "ema_entry_lvl": round(ema_entry_lvl, 2),
@@ -237,73 +237,81 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
     if vol_index is not None:
         metrics[vol_ticker.lstrip("^").lower()] = round(vol_index, 2)
     if realized_vol is not None:
-        metrics[f"vol{rvol_window}d_pct"] = round(realized_vol, 2)
+        metrics[f"vol{rvol_window}d_pct"] = round(realized_vol, 1)
 
     return new_pos, metrics, triggers
 
 
-def format_message(
-    cfg: dict,
-    old_pos: str,
-    new_pos: str,
-    m: dict,
-    triggers: list[str],
-    is_test: bool = False,
+def format_summary_message(
+    results: list[dict], is_test: bool = False, is_weekly: bool = False
 ) -> str:
-    """Erstellt die formatierte Telegram-Nachricht."""
-    ticker = cfg["ticker"]
-    sma_p = cfg["sma_period"]
-    exit_sma_p = cfg.get("exit_sma_period", sma_p)
+    """Erstellt EINE übersichtliche Sammel-Nachricht mit Aktionen + Status-Tabelle."""
+    data_date = results[0]["metrics"]["data_date"] if results else "-"
+    changes = [r for r in results if r["changed"]]
+    readonly = is_test or is_weekly
 
     if is_test:
-        header = f"<b>[TRIPLE LOCK - TEST] {ticker}</b>"
-        action = f"Aktueller Status: <b>{old_pos}</b> (kein State-Wechsel gespeichert)"
-    elif new_pos == "LONG":
-        header = f"🟢 <b>[TRIPLE LOCK] {ticker}: CASH → LONG</b>"
-        action = f"<b>Aktion:</b> Wechsel von <code>{cfg['cash_asset']}</code> in <code>{cfg['long_asset']}</code>"
+        header = f"🧪 <b>[TRIPLE LOCK - TEST] ({data_date})</b>"
+    elif is_weekly:
+        header = f"📊 <b>[TRIPLE LOCK] WOCHEN-STATUS ({data_date})</b>"
     else:
-        header = f"🔴 <b>[TRIPLE LOCK] {ticker}: LONG → CASH</b>"
-        action = f"<b>Aktion:</b> Wechsel von <code>{cfg['long_asset']}</code> in <code>{cfg['cash_asset']}</code>"
+        header = f"🚨 <b>[TRIPLE LOCK] SIGNAL-UPDATE ({data_date})</b>"
 
-    trigger_text = f"\n<b>Auslöser:</b> {', '.join(triggers)}" if triggers else ""
+    lines = [header, ""]
 
-    lines = [
-        f"{header}",
-        f"{action}{trigger_text}\n",
-        f"<b>Marktdaten ({m['data_date']}):</b>",
-        f"• {ticker}: <code>{m['price']:.2f}</code>",
-    ]
+    # 1. Aktionsblock (bei echten Wechseln oder Hinweis im Test-/Wochenmodus)
+    if changes and not readonly:
+        lines.append("<b>AKTION ERFORDERLICH:</b>")
+        for r in changes:
+            cfg = r["cfg"]
+            ticker = cfg["ticker"]
+            reason = ", ".join(r["triggers"])
+            if r["new_pos"] == "LONG":
+                lines.append(
+                    f"🟢 <b>KAUFEN: {ticker}</b> → Wechsel <code>{cfg['cash_asset']}</code> in <code>{cfg['long_asset']}</code>"
+                )
+            else:
+                lines.append(
+                    f"🔴 <b>VERKAUFEN: {ticker}</b> → Wechsel <code>{cfg['long_asset']}</code> in <code>{cfg['cash_asset']}</code>"
+                )
+            lines.append(f"   <i>Grund: {reason}</i>")
+        lines.append("")
+    elif is_test:
+        lines.append("<i>Testlauf: Kein State-Wechsel gespeichert.</i>\n")
+    elif is_weekly:
+        lines.append("<i>Wöchentlicher Status-Report (kein Signalwechsel).</i>\n")
 
-    if exit_sma_p == sma_p:
-        lines.append(
-            f"• SMA{sma_p}: <code>{m[f'sma{sma_p}']:.2f}</code> "
-            f"(Entry &gt; {m['sma_entry_lvl']:.2f} | Exit &lt; {m['sma_exit_lvl']:.2f})"
+    # 2. Kompakte Übersichtstabelle für alle Assets
+    lines.append("<b>PORTFOLIO-ÜBERSICHT:</b>")
+    table_rows = ["   Asset Ziel  Kurs   vsSMA   Vola"]
+
+    for r in results:
+        cfg = r["cfg"]
+        m = r["metrics"]
+        pos = r["old_pos"] if readonly else r["new_pos"]
+        icon = "🟢" if pos == "LONG" else "🔴"
+        target = cfg["long_asset"] if pos == "LONG" else cfg["cash_asset"]
+
+        # Kompakte Vola-Spalte: bei SOXX die 20d-Vola, sonst VIX/GVZ
+        if cfg.get("realized_vol_window"):
+            rvol_key = f"vol{cfg['realized_vol_window']}d_pct"
+            vol_str = f"{m[rvol_key]:.1f}%"
+        elif cfg.get("vol_ticker"):
+            v_key = cfg["vol_ticker"].lstrip("^").lower()
+            vol_str = f"{m[v_key]:.1f}"
+        else:
+            vol_str = "-"
+
+        row = (
+            f"{icon} {cfg['ticker']:<4}  {target:<4} "
+            f"{m['price']:>6.1f} {m['sma_dist_pct']:>+6.1f}% {vol_str:>5}"
         )
-    else:
-        lines.append(
-            f"• SMA{sma_p} / SMA{exit_sma_p}: <code>{m[f'sma{sma_p}']:.2f}</code> / <code>{m[f'sma{exit_sma_p}']:.2f}</code> "
-            f"(Entry &gt; {m['sma_entry_lvl']:.2f} | Exit &lt; {m['sma_exit_lvl']:.2f})"
-        )
+        table_rows.append(row)
 
-    if cfg.get("vol_ticker"):
-        v_name = cfg["vol_ticker"].lstrip("^")
-        v_val = m[v_name.lower()]
-        lines.append(
-            f"• {v_name}: <code>{v_val:.2f}</code> "
-            f"(Entry &lt; {cfg['vol_entry_max']:.0f} | Exit &gt; {cfg['vol_exit_min']:.0f})"
-        )
-
-    if cfg.get("realized_vol_window"):
-        rw = cfg["realized_vol_window"]
-        rv = m[f"vol{rw}d_pct"]
-        lines.append(
-            f"• Vol{rw}d: <code>{rv:.1f}%</code> "
-            f"(Entry &lt; {cfg['realized_vol_entry_max']:.0f}% | Exit &gt; {cfg['realized_vol_exit_min']:.0f}%)"
-        )
-
+    lines.append("<pre>" + "\n".join(table_rows) + "</pre>")
     lines.append(
-        f"• EMA{cfg['ema_fast']} / EMA{cfg['ema_slow']}: <code>{m['ema19']:.2f}</code> / <code>{m['ema39']:.2f}</code> "
-        f"(Entry &gt; {m['ema_entry_lvl']:.2f} | Exit &lt; {m['ema_exit_lvl']:.2f})"
+        "<i>🟢 = Investiert (3x) | 🔴 = Cash (XEON)\n"
+        "vsSMA = Abstand zum aktiven SMA (SOXX Exit: SMA50)</i>"
     )
 
     return "\n".join(lines)
@@ -314,12 +322,19 @@ def main() -> None:
     parser.add_argument(
         "--test-notify",
         action="store_true",
-        help="Sendet eine Test-Nachricht mit Live-Daten, ohne state.json zu verändern.",
+        help="Sendet eine Test-Sammelnachricht mit Live-Daten, ohne state.json zu verändern.",
+    )
+    parser.add_argument(
+        "--weekly-summary",
+        action="store_true",
+        help="Sendet den wöchentlichen Status-Report, ohne state.json zu verändern.",
     )
     args = parser.parse_args()
+    readonly_mode = args.test_notify or args.weekly_summary
 
     state = load_state()
     now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    results = []
     had_error = False
 
     for cfg in STRATEGIES:
@@ -334,28 +349,36 @@ def main() -> None:
             had_error = True
             continue
 
+        changed = new_pos != old_pos
         print(f"[{ticker}] Status: {old_pos} -> {new_pos} | Metrics: {metrics}")
 
-        if args.test_notify:
-            msg = format_message(cfg, old_pos, new_pos, metrics, triggers, is_test=True)
-            send_telegram_message(msg)
-            print(f"[{ticker}] Test-Benachrichtigung erfolgreich gesendet.")
-            continue
+        results.append(
+            {
+                "cfg": cfg,
+                "old_pos": old_pos,
+                "new_pos": new_pos,
+                "metrics": metrics,
+                "triggers": triggers,
+                "changed": changed,
+            }
+        )
 
-        # Stateful Push: Nur bei echtem Zustandswechsel benachrichtigen
-        if new_pos != old_pos:
-            msg = format_message(cfg, old_pos, new_pos, metrics, triggers, is_test=False)
-            send_telegram_message(msg)
-            print(f"[{ticker}] Signal-Benachrichtigung ({old_pos} -> {new_pos}) gesendet.")
+        if not readonly_mode:
+            state[ticker] = {
+                "position": new_pos,
+                "last_check": now_utc,
+                "indicators": metrics,
+            }
 
-        # State bei jedem regulären Lauf aktualisieren
-        state[ticker] = {
-            "position": new_pos,
-            "last_check": now_utc,
-            "indicators": metrics,
-        }
+    # Eine konsolidierte Nachricht senden bei Wechsel, Test oder Wochen-Report
+    if results and (readonly_mode or any(r["changed"] for r in results)):
+        msg = format_summary_message(
+            results, is_test=args.test_notify, is_weekly=args.weekly_summary
+        )
+        send_telegram_message(msg)
+        print("Nachricht erfolgreich an Telegram gesendet.")
 
-    if not args.test_notify:
+    if not readonly_mode and results:
         save_state(state)
         print("state.json erfolgreich aktualisiert.")
 
