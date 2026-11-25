@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from backtester import fetch_history, run_backtest, run_grid_search
+from backtester import compute_decade_breakdown, fetch_history, run_backtest, run_grid_search
 from config import STRATEGIES
 
 st.set_page_config(page_title="Triple Lock Backtester", layout="wide")
@@ -149,7 +149,7 @@ st.caption(
 )
 
 # --- TABS ---
-tab1, tab2 = st.tabs(["📊 Einzel-Backtest", "🔍 Parameter-Optimierer (Grid Search)"])
+tab1, tab2 = st.tabs(["📊 Einzel-Backtest & Dekaden", "🔍 Parameter-Optimierer & Heatmap"])
 
 with tab1:
     st.subheader("Performance-Vergleich")
@@ -198,6 +198,10 @@ with tab1:
     fig_dd.update_layout(hovermode="x unified", margin=dict(l=0, r=0, t=10, b=0), height=300)
     st.plotly_chart(fig_dd, use_container_width=True)
 
+    st.subheader("Dekaden-Check (Regime-Stabilität)")
+    dec_df = compute_decade_breakdown(df)
+    st.dataframe(dec_df, use_container_width=True, hide_index=True)
+
     with st.expander(f"Trade-Historie anzeigen ({len(trades_df)} Signale)"):
         if not trades_df.empty:
             st.dataframe(trades_df.sort_values("Date", ascending=False), use_container_width=True)
@@ -205,35 +209,40 @@ with tab1:
             st.info("Keine Trades im ausgewählten Zeitraum.")
 
 with tab2:
-    st.subheader("Automatische Parameter-Suche (Train / Test Split)")
+    st.subheader("Automatische Parameter-Suche (Train / Test Split & Plateau-Heatmap)")
     st.markdown(
-        "Testet systematisch Kombinationen aus SMA, EMA, VIX und Realized Vol. "
-        "Achte darauf, dass **Train Sharpe / Calmar** und **Test Sharpe / Calmar** beide stark sind (Overfitting-Schutz)."
+        "Achte darauf, dass **Train Sortino / Calmar** und **Test Sortino / Calmar** beide stark sind "
+        "und in der Heatmap ein **breites grünes Plateau** entsteht (kein einzelner Ausreißer)."
     )
 
     c1, c2, c3 = st.columns(3)
     with c1:
         sma_list = st.multiselect(
-            "SMA Perioden", [50, 100, 125, 150, 175, 200, 225, 250], default=[150, 200, 250]
+            "SMA Perioden", [100, 125, 150, 175, 200, 225, 250, 275], default=[150, 175, 200, 225, 250]
         )
-        test_ema_toggle = st.checkbox("EMA-Lock (An vs. Aus) testen", value=True)
+        test_ema_toggle = st.checkbox("EMA-Lock (An vs. Aus) testen", value=False)
     with c2:
-        vix_exit_list = st.multiselect("VIX Exit-Schwellen", [25.0, 27.0, 30.0, 35.0, 40.0], default=[27.0, 35.0])
-        test_vix_toggle = st.checkbox("VIX-Lock (An vs. Aus) testen", value=True)
-        test_rvol_toggle = st.checkbox("Realized-Vol-Lock (An vs. Aus) testen", value=has_rvol)
+        rvol_exit_list = st.multiselect(
+            "Realized-Vol Exit-Schwellen (%)", [30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 65.0], default=[35.0, 45.0, 55.0, 65.0]
+        )
+        test_rvol_toggle = st.checkbox("Realized-Vol-Lock (An vs. Aus) testen", value=True)
+        vix_exit_list = st.multiselect("VIX Exit-Schwellen", [27.0, 30.0, 35.0, 40.0], default=[35.0, 40.0])
+        test_vix_toggle = st.checkbox("VIX-Lock (An vs. Aus) testen", value=False)
     with c3:
-        split_year = st.number_input("Train/Test Split-Jahr", 2000, 2023, 2016)
+        split_year = st.number_input("Train/Test Split-Jahr", 1995, 2023, 2005)
         sort_metric = st.selectbox(
-            "Sortieren nach", ["Train Sharpe", "Train Calmar", "Sharpe", "Calmar", "CAGR (%)"]
+            "Sortieren nach",
+            ["Test Calmar", "Test Sortino", "Train Sortino", "Train Calmar", "Calmar", "Sortino", "CAGR (%)"],
         )
 
     if st.button("🚀 Optimierung starten", type="primary"):
         grid = {
             "sma_period": sma_list or [200],
-            "use_ema": [True, False] if test_ema_toggle else [use_ema],
-            "use_vol": [True, False] if test_vix_toggle else [use_vol],
-            "vol_exit_min": vix_exit_list or [27.0],
-            "use_rvol": [True, False] if test_rvol_toggle else [use_rvol],
+            "use_ema": [True, False] if test_ema_toggle else [False],
+            "use_vol": [True, False] if test_vix_toggle else [False],
+            "vol_exit_min": vix_exit_list or [35.0],
+            "use_rvol": [True, False] if test_rvol_toggle else [True],
+            "rvol_exit_min": rvol_exit_list or [55.0],
         }
 
         with st.spinner(f"Berechne Grid Search für {ticker_to_load} (ab {start_year})..."):
@@ -241,9 +250,38 @@ with tab2:
             res_df = run_grid_search(price_series, rf_series, v_series, params, grid, split_year=split_year)
 
         if not res_df.empty:
-            sort_col = sort_metric if sort_metric in res_df.columns else "Sharpe"
+            sort_col = sort_metric if sort_metric in res_df.columns else "Calmar"
             res_df = res_df.sort_values(by=sort_col, ascending=False).reset_index(drop=True)
             st.success(f"Fertig! {len(res_df)} eindeutige Kombinationen ausgewertet.")
+
+            # --- 2D PLATEAU-HEATMAP (SMA vs. Realized Vol Exit) ---
+            hm_df = res_df.dropna(subset=["rvol_exit_min"])
+            if len(hm_df["sma_period"].unique()) > 1 and len(hm_df["rvol_exit_min"].unique()) > 1:
+                st.subheader(f"2D Plateau-Heatmap: SMA vs. Realized-Vol Exit ({sort_col})")
+                pivot = hm_df.pivot_table(
+                    index="rvol_exit_min", columns="sma_period", values=sort_col, aggfunc="max"
+                ).sort_index(ascending=False)
+
+                fig_hm = go.Figure(
+                    data=go.Heatmap(
+                        z=pivot.values,
+                        x=[str(c) for c in pivot.columns],
+                        y=[f"{y:.0f}%" for y in pivot.index],
+                        colorscale="RdYlGn",
+                        text=pivot.values,
+                        texttemplate="%{z:.2f}",
+                        hovertemplate="SMA: %{x}<br>RVol Exit: %{y}<br>" + sort_col + ": %{z:.2f}<extra></extra>",
+                    )
+                )
+                fig_hm.update_layout(
+                    xaxis_title="SMA Periode",
+                    yaxis_title="Realized-Vol Exit-Schwelle",
+                    height=380,
+                    margin=dict(l=0, r=0, t=10, b=0),
+                )
+                st.plotly_chart(fig_hm, use_container_width=True)
+
+            st.subheader("Top 30 Kombinationen")
             st.dataframe(res_df.head(30), use_container_width=True)
 
             st.download_button(
