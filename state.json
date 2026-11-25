@@ -1,7 +1,72 @@
 {
   "QQQ": {
     "position": "CASH",
-    "last_check": null,
-    "indicators": {}
+    "last_check": "2026-11-25T17:25:01Z",
+    "indicators": {
+      "data_date": "2026-11-25",
+      "price": 619.96,
+      "sma200": 682.47,
+      "sma_entry_lvl": 696.12,
+      "sma_exit_lvl": 675.65,
+      "sma_dist_pct": -9.2,
+      "ema19": 662.66,
+      "ema39": 683.64,
+      "ema_entry_lvl": 685.01,
+      "ema_exit_lvl": 682.27,
+      "vix": 31.0
+    }
+  },
+  "SPY": {
+    "position": "CASH",
+    "last_check": "2026-11-25T17:25:01Z",
+    "indicators": {
+      "data_date": "2026-11-25",
+      "price": 707.24,
+      "sma200": 730.72,
+      "sma_entry_lvl": 745.34,
+      "sma_exit_lvl": 723.42,
+      "sma_dist_pct": -3.2,
+      "ema19": 734.68,
+      "ema39": 746.52,
+      "ema_entry_lvl": 748.02,
+      "ema_exit_lvl": 745.03,
+      "vix": 31.0
+    }
+  },
+  "GLD": {
+    "position": "CASH",
+    "last_check": "2026-11-25T17:25:01Z",
+    "indicators": {
+      "data_date": "2026-11-25",
+      "price": 320.35,
+      "sma200": 403.8,
+      "sma_entry_lvl": 411.87,
+      "sma_exit_lvl": 399.76,
+      "sma_dist_pct": -20.7,
+      "ema19": 348.33,
+      "ema39": 361.43,
+      "ema_entry_lvl": 362.16,
+      "ema_exit_lvl": 360.71,
+      "gvz": 33.64
+    }
+  },
+  "SOXX": {
+    "position": "CASH",
+    "last_check": "2026-11-25T17:25:01Z",
+    "indicators": {
+      "data_date": "2026-11-25",
+      "price": 121.86,
+      "sma200": 161.06,
+      "sma_entry_lvl": 164.28,
+      "sma_exit_lvl": 164.28,
+      "sma_dist_pct": -24.3,
+      "ema19": 143.1,
+      "ema39": 153.97,
+      "ema_entry_lvl": 154.28,
+      "ema_exit_lvl": 153.67,
+      "sma50": 165.94,
+      "vix": 31.0,
+      "vol20d_pct": 99.5
+    }
   }
 }
