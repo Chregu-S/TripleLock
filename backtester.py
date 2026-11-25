@@ -107,8 +107,6 @@ def run_backtest(
     use_ema = params["use_ema"]
     use_vol = params["use_vol"]
     use_rvol = params["use_rvol"]
-    if not d.get("use_ema", True) and "ema_pair" in d:
-    d["ema_pair"] = None
 
     prices = df["price"].to_numpy()
     sma_en = df["sma_entry"].to_numpy() * params["sma_entry_mult"]
@@ -276,6 +274,8 @@ def run_grid_search(
             d["vol_exit_min"] = None
         if not d.get("use_rvol", True) and "rvol_exit_min" in d:
             d["rvol_exit_min"] = None
+        if not d.get("use_ema", True) and "ema_pair" in d:
+            d["ema_pair"] = None
         sig = tuple(d.items())
         if sig not in seen:
             seen.add(sig)
