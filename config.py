@@ -2,6 +2,7 @@ STRATEGIES = [
     {
         "ticker": "QQQ",
         "backtest_ticker": "^NDX",   # Nasdaq-100 (ab 1985)
+        "proxy_div_yield": 0.8,      # Geschätzte Dividendenrendite p.a. in % für Kursindex
         "long_asset": "3QQQ",
         "cash_asset": "XEON",
         "sma_period": 200,
@@ -19,6 +20,7 @@ STRATEGIES = [
     {
         "ticker": "SPY",
         "backtest_ticker": "^GSPC",  # S&P 500 (ab 1980+)
+        "proxy_div_yield": 2.0,      # Hist. S&P 500 Dividendenrendite p.a. in %
         "long_asset": "3USL",
         "cash_asset": "XEON",
         "sma_period": 200,
@@ -35,7 +37,8 @@ STRATEGIES = [
     },
     {
         "ticker": "GLD",
-        "backtest_ticker": "GC=F",   # Gold Futures (ab 2000; Alternative: GLD ab 2004)
+        "backtest_ticker": "GC=F",   # Gold Futures (ab 2000)
+        "proxy_div_yield": 0.0,
         "long_asset": "3GOL",
         "cash_asset": "XEON",
         "sma_period": 200,
@@ -51,6 +54,7 @@ STRATEGIES = [
     {
         "ticker": "SOXX",
         "backtest_ticker": "^SOX",   # PHLX Semiconductor Index (ab 1994)
+        "proxy_div_yield": 1.0,
         "long_asset": "3SEM",
         "cash_asset": "XEON",
         "sma_period": 200,
