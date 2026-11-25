@@ -1,0 +1,57 @@
+name: Triple Lock Daily Check
+
+on:
+  schedule:
+    # Montag bis Freitag um 22:30 UTC (nach US-Börsenschluss)
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      test_notify:
+        description: "Test-Benachrichtigung senden (ändert state.json nicht)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  run-strategy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Abhängigkeiten installieren
+        run: pip install -r requirements.txt
+
+      - name: Triple Lock Strategie ausführen
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ "${{ github.event.inputs.test_notify }}" = "true" ]; then
+            python main.py --test-notify
+          else
+            python main.py
+          fi
+
+      - name: Aktualisierte state.json committen und pushen
+        if: ${{ github.event.inputs.test_notify != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet state.json; then
+            git add state.json
+            git commit -m "chore: update state.json [skip ci]"
+            git push
+          else
+            echo "Keine Änderungen in state.json."
+          fi
