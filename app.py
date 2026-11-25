@@ -228,6 +228,8 @@ with tab2:
         test_rvol_toggle = st.checkbox("Realized-Vol-Lock (An vs. Aus) testen", value=True)
         vix_exit_list = st.multiselect("VIX Exit-Schwellen", [27.0, 30.0, 35.0, 40.0], default=[35.0, 40.0])
         test_vix_toggle = st.checkbox("VIX-Lock (An vs. Aus) testen", value=False)
+        ema_options = {"12/26": (12, 26), "19/39": (19, 39), "20/50": (20, 50), "50/100": (50, 100), "50/200": (50, 200)}
+        ema_selected = st.multiselect("EMA-Paare", list(ema_options.keys()), default=["19/39", "20/50", "50/100"])
     with c3:
         split_year = st.number_input("Train/Test Split-Jahr", 1995, 2023, 2005)
         sort_metric = st.selectbox(
@@ -243,6 +245,7 @@ with tab2:
             "vol_exit_min": vix_exit_list or [35.0],
             "use_rvol": [True, False] if test_rvol_toggle else [True],
             "rvol_exit_min": rvol_exit_list or [55.0],
+            "ema_pair": [ema_options[k] for k in ema_selected] if (test_ema_toggle and ema_selected) else [(ema_fast, ema_slow)],
         }
 
         with st.spinner(f"Berechne Grid Search für {ticker_to_load} (ab {start_year})..."):
