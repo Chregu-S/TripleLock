@@ -287,7 +287,8 @@ def format_summary_message(results: list[dict], is_test: bool = False) -> str:
 
         # Kompakte Vola-Spalte: bei SOXX die 20d-Vola, sonst VIX/GVZ
         if cfg.get("realized_vol_window"):
-            vol_str = f"{m[f'vol{cfg[\"realized_vol_window\"]}d_pct']:.1f}%"
+            rvol_key = f"vol{cfg['realized_vol_window']}d_pct"
+            vol_str = f"{m[rvol_key]:.1f}%"
         elif cfg.get("vol_ticker"):
             v_key = cfg["vol_ticker"].lstrip("^").lower()
             vol_str = f"{m[v_key]:.1f}"
