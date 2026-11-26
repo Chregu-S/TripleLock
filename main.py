@@ -9,12 +9,9 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-STATE_FILE = Path("state.json")
+from config import STRATEGIES
 
-# Modulare Strategie-Konfiguration
-STRATEGIES = [
-    from config import STRATEGIES
-]
+STATE_FILE = Path("state.json")
 
 
 def load_state() -> dict:
@@ -72,25 +69,35 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
     ticker = cfg["ticker"]
     sma_period = cfg["sma_period"]
     exit_sma_period = cfg.get("exit_sma_period", sma_period)
+    use_ema = cfg.get("use_ema", True) and cfg.get("ema_fast") and cfg.get("ema_slow")
 
-    close = fetch_close_series(ticker, min_rows=250)
+    min_rows = max(250, sma_period + 20, exit_sma_period + 20)
+    close = fetch_close_series(ticker, min_rows=min_rows)
 
     sma_entry_series = close.rolling(window=sma_period).mean()
     sma_exit_series = close.rolling(window=exit_sma_period).mean()
-    ema_fast_series = close.ewm(span=cfg["ema_fast"], adjust=False).mean()
-    ema_slow_series = close.ewm(span=cfg["ema_slow"], adjust=False).mean()
 
     price = float(close.iloc[-1])
     sma_entry = float(sma_entry_series.iloc[-1])
     sma_exit = float(sma_exit_series.iloc[-1])
-    ema_fast = float(ema_fast_series.iloc[-1])
-    ema_slow = float(ema_slow_series.iloc[-1])
     data_date = close.index[-1].strftime("%Y-%m-%d")
 
-    if any(pd.isna(val) for val in (price, sma_entry, sma_exit, ema_fast, ema_slow)):
-        raise ValueError(f"NaN-Wert in den berechneten Indikatoren für {ticker}.")
+    if any(pd.isna(val) for val in (price, sma_entry, sma_exit)):
+        raise ValueError(f"NaN-Wert in den SMA-Indikatoren für {ticker}.")
 
-    # Optional: Externer Volatilitäts-Index (^VIX, ^GVZ)
+    # Optional: EMA-Lock
+    ema_fast = ema_slow = ema_entry_lvl = ema_exit_lvl = None
+    if use_ema:
+        ema_fast_series = close.ewm(span=cfg["ema_fast"], adjust=False).mean()
+        ema_slow_series = close.ewm(span=cfg["ema_slow"], adjust=False).mean()
+        ema_fast = float(ema_fast_series.iloc[-1])
+        ema_slow = float(ema_slow_series.iloc[-1])
+        if any(pd.isna(val) for val in (ema_fast, ema_slow)):
+            raise ValueError(f"NaN-Wert in den EMA-Indikatoren für {ticker}.")
+        ema_entry_lvl = ema_slow * cfg["ema_entry_mult"]
+        ema_exit_lvl = ema_slow * cfg["ema_exit_mult"]
+
+    # Optional: Externer Volatilitäts-Index (^VIX)
     vol_ticker = cfg.get("vol_ticker")
     vol_index = None
     if vol_ticker:
@@ -110,15 +117,13 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
 
     sma_entry_lvl = sma_entry * cfg["sma_entry_mult"]
     sma_exit_lvl = sma_exit * cfg["sma_exit_mult"]
-    ema_entry_lvl = ema_slow * cfg["ema_entry_mult"]
-    ema_exit_lvl = ema_slow * cfg["ema_exit_mult"]
 
     new_pos = current_pos
     triggers = []
 
     if current_pos == "CASH":
         cond_sma = price > sma_entry_lvl
-        cond_ema = ema_fast > ema_entry_lvl
+        cond_ema = True if not use_ema else (ema_fast > ema_entry_lvl)
         cond_vol = True if vol_index is None else (vol_index < cfg["vol_entry_max"])
         cond_rvol = (
             True
@@ -135,7 +140,7 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
             triggers.append(
                 f"{ticker} &lt; SMA{exit_sma_period}-Exit ({price:.2f} &lt; {sma_exit_lvl:.2f})"
             )
-        if ema_fast < ema_exit_lvl:
+        if use_ema and ema_fast < ema_exit_lvl:
             triggers.append(
                 f"EMA{cfg['ema_fast']} &lt; EMA{cfg['ema_slow']}-Exit ({ema_fast:.2f} &lt; {ema_exit_lvl:.2f})"
             )
@@ -161,13 +166,14 @@ def evaluate_strategy(cfg: dict, current_pos: str) -> tuple[str, dict, list[str]
         "sma_entry_lvl": round(sma_entry_lvl, 2),
         "sma_exit_lvl": round(sma_exit_lvl, 2),
         "sma_dist_pct": round(sma_dist_pct, 1),
-        "ema19": round(ema_fast, 2),
-        "ema39": round(ema_slow, 2),
-        "ema_entry_lvl": round(ema_entry_lvl, 2),
-        "ema_exit_lvl": round(ema_exit_lvl, 2),
     }
     if exit_sma_period != sma_period:
         metrics[f"sma{exit_sma_period}"] = round(sma_exit, 2)
+    if use_ema:
+        metrics[f"ema{cfg['ema_fast']}"] = round(ema_fast, 2)
+        metrics[f"ema{cfg['ema_slow']}"] = round(ema_slow, 2)
+        metrics["ema_entry_lvl"] = round(ema_entry_lvl, 2)
+        metrics["ema_exit_lvl"] = round(ema_exit_lvl, 2)
     if vol_index is not None:
         metrics[vol_ticker.lstrip("^").lower()] = round(vol_index, 2)
     if realized_vol is not None:
@@ -217,7 +223,7 @@ def format_summary_message(
 
     # 2. Kompakte Übersichtstabelle für alle Assets
     lines.append("<b>PORTFOLIO-ÜBERSICHT:</b>")
-    table_rows = ["   Asset Ziel  Kurs   vsSMA   Vola"]
+    table_rows = ["   Asset Ziel  Kurs   vsSMA   RVol"]
 
     for r in results:
         cfg = r["cfg"]
@@ -226,7 +232,6 @@ def format_summary_message(
         icon = "🟢" if pos == "LONG" else "🔴"
         target = cfg["long_asset"] if pos == "LONG" else cfg["cash_asset"]
 
-        # Kompakte Vola-Spalte: bei SOXX die 20d-Vola, sonst VIX/GVZ
         if cfg.get("realized_vol_window"):
             rvol_key = f"vol{cfg['realized_vol_window']}d_pct"
             vol_str = f"{m[rvol_key]:.1f}%"
@@ -243,9 +248,14 @@ def format_summary_message(
         table_rows.append(row)
 
     lines.append("<pre>" + "\n".join(table_rows) + "</pre>")
+
+    # Aktuellen VIX einmal kompakt darunter anzeigen, falls geladen
+    vix_vals = [r["metrics"].get("vix") for r in results if r["metrics"].get("vix") is not None]
+    vix_note = f" | VIX: {vix_vals[0]:.1f}" if vix_vals else ""
+
     lines.append(
-        "<i>🟢 = Investiert (3x) | 🔴 = Cash (XEON)\n"
-        "vsSMA = Abstand zum aktiven SMA (SOXX Exit: SMA100)</i>"
+        f"<i>🟢 = Investiert (3x) | 🔴 = Cash (XEON){vix_note}\n"
+        "vsSMA = Abstand zum SMA (QQQ/GLD: 175, SPY/SOXX: 200)</i>"
     )
 
     return "\n".join(lines)
