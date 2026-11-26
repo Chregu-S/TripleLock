@@ -1,72 +1,60 @@
 {
   "QQQ": {
     "position": "CASH",
-    "last_check": "2026-11-25T17:29:13Z",
+    "last_check": "2026-11-26T07:50:01Z",
     "indicators": {
       "data_date": "2026-11-25",
-      "price": 619.83,
-      "sma200": 682.47,
-      "sma_entry_lvl": 696.12,
-      "sma_exit_lvl": 675.65,
-      "sma_dist_pct": -9.2,
-      "ema19": 662.64,
-      "ema39": 683.63,
-      "ema_entry_lvl": 685.0,
-      "ema_exit_lvl": 682.27,
-      "vix": 30.79
+      "price": 633.93,
+      "sma175": 693.95,
+      "sma_entry_lvl": 707.83,
+      "sma_exit_lvl": 687.01,
+      "sma_dist_pct": -8.6,
+      "vol20d_pct": 47.7
     }
   },
   "SPY": {
     "position": "CASH",
-    "last_check": "2026-11-25T17:29:13Z",
+    "last_check": "2026-11-26T07:50:01Z",
     "indicators": {
       "data_date": "2026-11-25",
-      "price": 707.15,
-      "sma200": 730.72,
-      "sma_entry_lvl": 745.34,
-      "sma_exit_lvl": 723.42,
-      "sma_dist_pct": -3.2,
-      "ema19": 734.67,
-      "ema39": 746.52,
-      "ema_entry_lvl": 748.01,
-      "ema_exit_lvl": 745.03,
-      "vix": 30.79
+      "price": 716.7,
+      "sma200": 730.77,
+      "sma_entry_lvl": 745.39,
+      "sma_exit_lvl": 723.46,
+      "sma_dist_pct": -1.9,
+      "ema50": 749.68,
+      "ema100": 749.28,
+      "ema_entry_lvl": 750.78,
+      "ema_exit_lvl": 745.53,
+      "vol20d_pct": 31.6
     }
   },
   "GLD": {
     "position": "CASH",
-    "last_check": "2026-11-25T17:29:13Z",
+    "last_check": "2026-11-26T07:50:01Z",
     "indicators": {
       "data_date": "2026-11-25",
-      "price": 320.82,
-      "sma200": 403.8,
-      "sma_entry_lvl": 411.88,
-      "sma_exit_lvl": 399.76,
-      "sma_dist_pct": -20.5,
-      "ema19": 348.38,
-      "ema39": 361.46,
-      "ema_entry_lvl": 362.18,
-      "ema_exit_lvl": 360.73,
-      "gvz": 33.64
+      "price": 327.45,
+      "sma175": 394.69,
+      "sma_entry_lvl": 402.59,
+      "sma_exit_lvl": 390.75,
+      "sma_dist_pct": -17.0,
+      "vix": 28.29,
+      "vol20d_pct": 33.9
     }
   },
   "SOXX": {
     "position": "CASH",
-    "last_check": "2026-11-25T17:29:13Z",
+    "last_check": "2026-11-26T07:50:01Z",
     "indicators": {
       "data_date": "2026-11-25",
-      "price": 121.76,
-      "sma200": 161.06,
-      "sma_entry_lvl": 164.28,
-      "sma_exit_lvl": 164.28,
-      "sma_dist_pct": -24.4,
-      "ema19": 143.09,
-      "ema39": 153.97,
-      "ema_entry_lvl": 154.28,
-      "ema_exit_lvl": 153.66,
-      "sma50": 165.94,
-      "vix": 30.79,
-      "vol20d_pct": 99.6
+      "price": 127.98,
+      "sma200": 161.09,
+      "sma_entry_lvl": 164.31,
+      "sma_exit_lvl": 159.48,
+      "sma_dist_pct": -20.6,
+      "vix": 28.29,
+      "vol20d_pct": 98.6
     }
   }
 }
