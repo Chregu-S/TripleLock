@@ -1,7 +1,7 @@
 {
   "QQQ": {
     "position": "CASH",
-    "last_check": "2026-11-26T07:50:01Z",
+    "last_check": "2026-11-27T04:24:27Z",
     "indicators": {
       "data_date": "2026-11-25",
       "price": 633.93,
@@ -14,7 +14,7 @@
   },
   "SPY": {
     "position": "CASH",
-    "last_check": "2026-11-26T07:50:01Z",
+    "last_check": "2026-11-27T04:24:27Z",
     "indicators": {
       "data_date": "2026-11-25",
       "price": 716.7,
@@ -31,7 +31,7 @@
   },
   "GLD": {
     "position": "CASH",
-    "last_check": "2026-11-26T07:50:01Z",
+    "last_check": "2026-11-27T04:24:27Z",
     "indicators": {
       "data_date": "2026-11-25",
       "price": 327.45,
@@ -39,13 +39,13 @@
       "sma_entry_lvl": 402.59,
       "sma_exit_lvl": 390.75,
       "sma_dist_pct": -17.0,
-      "vix": 28.29,
+      "vix": 26.8,
       "vol20d_pct": 33.9
     }
   },
   "SOXX": {
     "position": "CASH",
-    "last_check": "2026-11-26T07:50:01Z",
+    "last_check": "2026-11-27T04:24:27Z",
     "indicators": {
       "data_date": "2026-11-25",
       "price": 127.98,
@@ -53,7 +53,7 @@
       "sma_entry_lvl": 164.31,
       "sma_exit_lvl": 159.48,
       "sma_dist_pct": -20.6,
-      "vix": 28.29,
+      "vix": 26.8,
       "vol20d_pct": 98.6
     }
   }
